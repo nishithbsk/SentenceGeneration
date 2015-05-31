@@ -33,11 +33,10 @@ class BRNNLM(NNBase):
         L0 : initial input word vectors
         U0 : initial output word vectors
         alpha : default learning rate
-        bptt : number of backprop timesteps
     """
 
     def __init__(self, L0, U0=None,
-                 alpha=0.005, rseed=10, bptt=1):
+                 alpha=0.005, rseed=10):
 
         self.hdim = L0.shape[1] # word vector dimensions
         self.vdim = L0.shape[0] # vocab size
@@ -50,7 +49,6 @@ class BRNNLM(NNBase):
 
         #### YOUR CODE HERE ####
         np.random.seed(rseed) # be sure to seed this for repeatability!
-        self.bptt = bptt
         self.alpha = alpha
 
         # Initialize word vectors
@@ -194,12 +192,7 @@ class BRNNLM(NNBase):
 
         Do not modify this function!
         """
-        bptt_old = self.bptt
-        self.bptt = len(y)
-        print >> outfd, "NOTE: temporarily setting self.bptt = len(y) = %d to compute true gradient." % self.bptt
         NNBase.grad_check(self, x, y, outfd=outfd, **kwargs)
-        self.bptt = bptt_old
-        print >> outfd, "Reset self.bptt = %d" % self.bptt
 
 
     def compute_seq_loss(self, sentence, ys):
