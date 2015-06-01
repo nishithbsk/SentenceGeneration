@@ -33,11 +33,10 @@ class BRNNLM(NNBase):
         L0 : initial input word vectors
         U0 : initial output word vectors
         alpha : default learning rate
-        bptt : number of backprop timesteps
     """
 
     def __init__(self, L0, U0=None,
-                 alpha=0.005, rseed=10, bptt=1):
+                 alpha=0.005, rseed=10):
 
         self.hdim = L0.shape[1] # word vector dimensions
         self.vdim = L0.shape[0] # vocab size
@@ -50,7 +49,6 @@ class BRNNLM(NNBase):
 
         #### YOUR CODE HERE ####
         np.random.seed(rseed) # be sure to seed this for repeatability!
-        self.bptt = bptt
         self.alpha = alpha
 
         # Initialize word vectors
@@ -67,7 +65,7 @@ class BRNNLM(NNBase):
         #### END YOUR CODE ####
 
 
-    def _acc_grads(self, xs, ys):
+    def _acc_grads(self, sentence, ys):
         """
         Accumulate gradients, given a pair of training sequences:
         xs = [<indices>] # input words
@@ -98,14 +96,19 @@ class BRNNLM(NNBase):
         be a vector of zeros.
         """
 
+        """
+        ys are not used
+        """
+
         # Expect xs as list of indices
-        ns = len(xs)
+        ns = len(sentence)
+        if ns <= 2:
+            return
 
         # make matrix here of corresponding h(t)
-        # hs[-1] = initial hidden state (zeros)
-        lhs = np.zeros((ns+1, self.hdim))
+        lhs = np.zeros((ns, self.hdim))
         lzs = np.zeros((ns, self.hdim))
-        rhs = np.zeros((ns+1, self.hdim))
+        rhs = np.zeros((ns, self.hdim))
         rzs = np.zeros((ns, self.hdim))
         # predicted probas
         ps = np.zeros((ns, self.vdim))
@@ -114,52 +117,50 @@ class BRNNLM(NNBase):
 
         ##
         # Forward propagation left -> right
-        for i in xrange(ns):
-            x = xs[i]
-            h = lhs[i - 1]
-            lzs[i] = self.params.LH.dot(h) + self.sparams.LL[x]
-            lhs[i] = sigmoid(lzs[i])
+        for i in xrange(ns-1):
+            x = sentence[i]
+            h = lhs[i]
+            lzs[i+1] = self.params.LH.dot(h) + self.sparams.LL[x]
+            lhs[i+1] = sigmoid(lzs[i+1])
 
         ##
         # Forward propagation right -> left
-        for i in reversed(xrange(ns)):
-            x = xs[i]
-            h = rhs[i + 1]
-            rzs[i] = self.params.RH.dot(h) + self.sparams.RL[x]
-            rhs[i] = sigmoid(rzs[i])
+        for i in reversed(xrange(1, ns)):
+            x = sentence[i]
+            h = rhs[i]
+            rzs[i-1] = self.params.RH.dot(h) + self.sparams.RL[x]
+            rhs[i-1] = sigmoid(rzs[i-1])
 
-        for i in xrange(ns):
+        for i in xrange(1, ns-1):
             ps[i] = softmax(self.params.U.dot(np.concatenate((lhs[i], rhs[i]))))
 
-        ldelta_1 = []
-        rdelta_1 = []
+        ldelta_1 = np.zeros((ns, self.hdim))
+        rdelta_1 = np.zeros((ns, self.hdim))
         ##
         # Backward propagation for U and delta_1
-        for i in xrange(ns):
+        for i in xrange(1, ns-1):
             delta_2 = ps[i]
-            delta_2[ys[i]] -= 1.0
+            delta_2[sentence[i]] -= 1.0
             self.grads.U += np.outer(delta_2, np.concatenate((lhs[i], rhs[i])))
             delta_1 = self.params.U.T.dot(delta_2) * sigmoid_grad(np.concatenate((lzs[i], rzs[i])))
-            ldelta_1.append(delta_1[:self.hdim])
-            rdelta_1.append(delta_1[self.hdim:])
+            ldelta_1[i] = delta_1[:self.hdim]
+            rdelta_1[i] = delta_1[self.hdim:]
         ##
         # right -> left backward propogation
         delta_1 = np.zeros(self.hdim)
-        for i in reversed(xrange(ns)):
+        for i in reversed(xrange(1, ns-1)):
             delta_1 += ldelta_1[i]
-            self.sgrads.LL[xs[i]] = delta_1
+            self.sgrads.LL[sentence[i-1]] = delta_1
             self.grads.LH += np.outer(delta_1, lhs[i-1])
-            if i > 0:
-                delta_1 = self.params.LH.T.dot(delta_1) * sigmoid_grad(lzs[i-1])
+            delta_1 = self.params.LH.T.dot(delta_1) * sigmoid_grad(lzs[i-1])
         ##
         # left -> right backward propogation
         delta_1 = np.zeros(self.hdim)
-        for i in xrange(ns):
+        for i in xrange(1, ns-1):
             delta_1 += rdelta_1[i]
-            self.sgrads.RL[xs[i]] = delta_1
+            self.sgrads.RL[sentence[i+1]] = delta_1
             self.grads.RH += np.outer(delta_1, rhs[i+1])
-            if i < ns-1:
-                delta_1 = self.params.RH.T.dot(delta_1) * sigmoid_grad(rzs[i+1])
+            delta_1 = self.params.RH.T.dot(delta_1) * sigmoid_grad(rzs[i+1])
 
         #### END YOUR CODE ####
 
@@ -191,15 +192,10 @@ class BRNNLM(NNBase):
 
         Do not modify this function!
         """
-        bptt_old = self.bptt
-        self.bptt = len(y)
-        print >> outfd, "NOTE: temporarily setting self.bptt = len(y) = %d to compute true gradient." % self.bptt
         NNBase.grad_check(self, x, y, outfd=outfd, **kwargs)
-        self.bptt = bptt_old
-        print >> outfd, "Reset self.bptt = %d" % self.bptt
 
 
-    def compute_seq_loss(self, xs, ys):
+    def compute_seq_loss(self, sentence, ys):
         """
         Compute the total cross-entropy loss
         for an input sequence xs and output
@@ -210,21 +206,25 @@ class BRNNLM(NNBase):
         and return the sum of the point losses.
         """
 
+        """
+        ys are not used
+        """
+
         J = 0
         #### YOUR CODE HERE ####
-        ns = len(xs)
-        lhs = np.zeros((ns+1, self.hdim))
-        rhs = np.zeros((ns+1, self.hdim))
-        for i in xrange(ns):
-            x = xs[i]
-            h = lhs[i - 1]
-            lhs[i] = sigmoid(self.params.LH.dot(h) + self.sparams.LL[x])
-        for i in reversed(xrange(ns)):
-            x = xs[i]
-            h = rhs[i + 1]
-            rhs[i] = sigmoid(self.params.RH.dot(h) + self.sparams.RL[x])
-        for i in xrange(ns):
-            y = ys[i]
+        ns = len(sentence)
+        lhs = np.zeros((ns, self.hdim))
+        rhs = np.zeros((ns, self.hdim))
+        for i in xrange(ns-1):
+            x = sentence[i]
+            h = lhs[i]
+            lhs[i+1] = sigmoid(self.params.LH.dot(h) + self.sparams.LL[x])
+        for i in reversed(xrange(1, ns)):
+            x = sentence[i]
+            h = rhs[i]
+            rhs[i-1] = sigmoid(self.params.RH.dot(h) + self.sparams.RL[x])
+        for i in xrange(1, ns-1):
+            y = sentence[i]
             y_hat = softmax(self.params.U.dot(np.concatenate((lhs[i], rhs[i]))))
             J -= np.log(y_hat[y])
 
@@ -254,6 +254,24 @@ class BRNNLM(NNBase):
         J = self.compute_loss(X, Y)
         ntot = np.sum(map(len,Y))
         return J / float(ntot)
+
+    def generate_missing(self, before, after):
+        J = 0 # total loss
+
+        #### YOUR CODE HERE ####
+        lh = np.zeros(self.hdim)
+        for x in before:
+            z = self.params.LH.dot(lh) + self.sparams.LL[x]
+            lh = sigmoid(z)
+        rh = np.zeros(self.hdim)
+        for x in reversed(after):
+            z = self.params.RH.dot(rh) + self.sparams.RL[x]
+            rh = sigmoid(z)
+        y_hat = softmax(self.params.U.dot(np.concatenate((lh, rh))))
+        middle = multinomial_sample(y_hat)
+        print y_hat[middle]
+        J -= np.log(y_hat[middle])
+        return before + [middle] + after, J
 
 
     def generate_sequence(self, init, end, maxlen=100):
