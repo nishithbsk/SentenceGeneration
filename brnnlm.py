@@ -255,7 +255,7 @@ class BRNNLM(NNBase):
         ntot = np.sum(map(len,Y))
         return J / float(ntot)
 
-    def generate_missing(self, before, after):
+    def generate_rand_missing(self, before, after):
         J = 0 # total loss
 
         #### YOUR CODE HERE ####
@@ -270,8 +270,29 @@ class BRNNLM(NNBase):
         y_hat = softmax(self.params.U.dot(np.concatenate((lh, rh))))
         middle = multinomial_sample(y_hat)
         print y_hat[middle]
-        J -= np.log(y_hat[middle])
-        return before + [middle] + after, J
+        return before + [middle] + after, J, y_hat[middle]
+
+    def generate_rank_missing(self, before, after, nres=5):
+        Js = np.zeros(nres) # total loss
+        Ps = []
+        seqs = []
+
+        lh = np.zeros(self.hdim)
+        for x in before:
+            z = self.params.LH.dot(lh) + self.sparams.LL[x]
+            lh = sigmoid(z)
+        rh = np.zeros(self.hdim)
+        for x in reversed(after):
+            z = self.params.RH.dot(rh) + self.sparams.RL[x]
+            rh = sigmoid(z)
+        y_hat = softmax(self.params.U.dot(np.concatenate((lh, rh))))
+        for i in xrange(nres):
+            high_idx = np.argmax(y_hat)
+            seqs.append(before + [high_idx] + after)
+            Js[i] -= np.log(y_hat[high_idx])
+            Ps.append(y_hat[high_idx])
+            y_hat[high_idx] = 0.0
+        return seqs, Js, Ps
 
 
     def generate_sequence(self, init, end, maxlen=100):
@@ -319,3 +340,4 @@ class BRNNLM(NNBase):
 
         #### YOUR CODE HERE ####
         return ys, J
+
