@@ -54,8 +54,10 @@ class BRNNLM(NNBase):
         # Initialize word vectors
         # either copy the passed L0 and U0 (and initialize in your notebook)
         # or initialize with gaussian noise here
-        self.sparams.LL = np.random.randn(*L0.shape) * np.sqrt(0.1)
-        self.sparams.RL = np.random.randn(*L0.shape) * np.sqrt(0.1)
+        #self.sparams.LL = np.random.randn(*L0.shape) * np.sqrt(0.1)
+        #self.sparams.RL = np.random.randn(*L0.shape) * np.sqrt(0.1)
+        self.sparams.LL = L0
+        self.sparams.RL = L0
         self.params.U = np.random.randn(self.vdim, self.hdim*2) * np.sqrt(0.1)
 
         # Initialize H matrix, as with W and U in part 1
@@ -150,7 +152,7 @@ class BRNNLM(NNBase):
         delta_1 = np.zeros(self.hdim)
         for i in reversed(xrange(1, ns-1)):
             delta_1 += ldelta_1[i]
-            self.sgrads.LL[sentence[i-1]] = delta_1
+            #self.sgrads.LL[sentence[i-1]] = delta_1
             self.grads.LH += np.outer(delta_1, lhs[i-1])
             delta_1 = self.params.LH.T.dot(delta_1) * sigmoid_grad(lzs[i-1])
         ##
@@ -158,7 +160,7 @@ class BRNNLM(NNBase):
         delta_1 = np.zeros(self.hdim)
         for i in xrange(1, ns-1):
             delta_1 += rdelta_1[i]
-            self.sgrads.RL[sentence[i+1]] = delta_1
+            #self.sgrads.RL[sentence[i+1]] = delta_1
             self.grads.RH += np.outer(delta_1, rhs[i+1])
             delta_1 = self.params.RH.T.dot(delta_1) * sigmoid_grad(rzs[i+1])
 
@@ -195,7 +197,7 @@ class BRNNLM(NNBase):
         NNBase.grad_check(self, x, y, outfd=outfd, **kwargs)
 
 
-    def compute_seq_loss(self, sentence, ys):
+    def compute_seq_loss(self, sentence, ys, wv=None):
         """
         Compute the total cross-entropy loss
         for an input sequence xs and output
@@ -218,13 +220,17 @@ class BRNNLM(NNBase):
         for i in xrange(ns-1):
             x = sentence[i]
             h = lhs[i]
-            lhs[i+1] = sigmoid(self.params.LH.dot(h) + self.sparams.LL[x])
+            vec = wv[x] if wv is not None else self.sparams.LL[x]
+            lhs[i+1] = sigmoid(self.params.LH.dot(h) + vec)
         for i in reversed(xrange(1, ns)):
             x = sentence[i]
             h = rhs[i]
-            rhs[i-1] = sigmoid(self.params.RH.dot(h) + self.sparams.RL[x])
+            vec = wv[x] if wv is not None else self.sparams.RL[x]
+            rhs[i-1] = sigmoid(self.params.RH.dot(h) + vec)
         for i in xrange(1, ns-1):
             y = sentence[i]
+            if y >= self.vdim:
+                continue
             y_hat = softmax(self.params.U.dot(np.concatenate((lhs[i], rhs[i]))))
             J -= np.log(y_hat[y])
 
@@ -255,44 +261,46 @@ class BRNNLM(NNBase):
         ntot = np.sum(map(len,Y))
         return J / float(ntot)
 
-    def generate_rand_missing(self, before, after):
-        J = 0 # total loss
-
-        #### YOUR CODE HERE ####
-        lh = np.zeros(self.hdim)
-        for x in before:
-            z = self.params.LH.dot(lh) + self.sparams.LL[x]
-            lh = sigmoid(z)
-        rh = np.zeros(self.hdim)
-        for x in reversed(after):
-            z = self.params.RH.dot(rh) + self.sparams.RL[x]
-            rh = sigmoid(z)
-        y_hat = softmax(self.params.U.dot(np.concatenate((lh, rh))))
-        middle = multinomial_sample(y_hat)
-        print y_hat[middle]
-        return before + [middle] + after, J, y_hat[middle]
-
-    def generate_rank_missing(self, before, after, nres=5):
-        Js = np.zeros(nres) # total loss
+    def generate_missing_word(self, before, after, wv=None, nres=5):
         Ps = []
-        seqs = []
+        missings = []
 
         lh = np.zeros(self.hdim)
         for x in before:
-            z = self.params.LH.dot(lh) + self.sparams.LL[x]
+            vec = wv[x] if wv is not None else self.sparams.LL[x]
+            z = self.params.LH.dot(lh) + vec
             lh = sigmoid(z)
         rh = np.zeros(self.hdim)
         for x in reversed(after):
-            z = self.params.RH.dot(rh) + self.sparams.RL[x]
+            vec = wv[x] if wv is not None else self.sparams.RL[x]
+            z = self.params.RH.dot(rh) + vec
             rh = sigmoid(z)
         y_hat = softmax(self.params.U.dot(np.concatenate((lh, rh))))
         for i in xrange(nres):
             high_idx = np.argmax(y_hat)
-            seqs.append(before + [high_idx] + after)
-            Js[i] -= np.log(y_hat[high_idx])
+            missings.append(high_idx)
             Ps.append(y_hat[high_idx])
             y_hat[high_idx] = 0.0
-        return seqs, Js, Ps
+        return missings
+
+    def generate_missing_seqs(self, before, after, nwords=1, wv=None, nres=5):
+        target_len = len(before) + len(after) + nwords
+        seqs = []
+        candidates = [(before, after)]
+        while len(candidates) > 0:
+            b, a = candidates[0]
+            if len(b) + len(a) == target_len:
+                break
+            words = self.generate_missing_word(b, a, wv, nres)
+            for word in words:
+                candidates.append((b+[word], a))
+                candidates.append((b, [word]+a))
+            candidates.pop(0)
+        for i in xrange(len(candidates)/2):
+            sentence = candidates[i*2][0] + candidates[i*2][1]
+            seqs.append((sentence, self.compute_seq_loss(sentence, None, wv)))
+        seqs = sorted(seqs, key=lambda x:x[1])
+        return seqs
 
 
     def generate_sequence(self, init, end, maxlen=100):
