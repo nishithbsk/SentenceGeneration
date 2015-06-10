@@ -152,7 +152,7 @@ class BRNNLM(NNBase):
         delta_1 = np.zeros(self.hdim)
         for i in reversed(xrange(1, ns-1)):
             delta_1 += ldelta_1[i]
-            #self.sgrads.LL[sentence[i-1]] = delta_1
+            self.sgrads.LL[sentence[i-1]] = delta_1
             self.grads.LH += np.outer(delta_1, lhs[i-1])
             delta_1 = self.params.LH.T.dot(delta_1) * sigmoid_grad(lzs[i-1])
         ##
@@ -160,7 +160,7 @@ class BRNNLM(NNBase):
         delta_1 = np.zeros(self.hdim)
         for i in xrange(1, ns-1):
             delta_1 += rdelta_1[i]
-            #self.sgrads.RL[sentence[i+1]] = delta_1
+            self.sgrads.RL[sentence[i+1]] = delta_1
             self.grads.RH += np.outer(delta_1, rhs[i+1])
             delta_1 = self.params.RH.T.dot(delta_1) * sigmoid_grad(rzs[i+1])
 
@@ -220,17 +220,17 @@ class BRNNLM(NNBase):
         for i in xrange(ns-1):
             x = sentence[i]
             h = lhs[i]
-            vec = wv[x] if wv is not None else self.sparams.LL[x]
+            vec = wv[x] if x >= self.vdim else self.sparams.LL[x]
             lhs[i+1] = sigmoid(self.params.LH.dot(h) + vec)
         for i in reversed(xrange(1, ns)):
             x = sentence[i]
             h = rhs[i]
-            vec = wv[x] if wv is not None else self.sparams.RL[x]
+            vec = wv[x] if x >= self.vdim else self.sparams.RL[x]
             rhs[i-1] = sigmoid(self.params.RH.dot(h) + vec)
         for i in xrange(1, ns-1):
             y = sentence[i]
             if y >= self.vdim:
-                continue
+                y = 3 # UUUNKKK
             y_hat = softmax(self.params.U.dot(np.concatenate((lhs[i], rhs[i]))))
             J -= np.log(y_hat[y])
 
@@ -267,12 +267,12 @@ class BRNNLM(NNBase):
 
         lh = np.zeros(self.hdim)
         for x in before:
-            vec = wv[x] if wv is not None else self.sparams.LL[x]
+            vec = wv[x] if x >= self.vdim else self.sparams.LL[x]
             z = self.params.LH.dot(lh) + vec
             lh = sigmoid(z)
         rh = np.zeros(self.hdim)
         for x in reversed(after):
-            vec = wv[x] if wv is not None else self.sparams.RL[x]
+            vec = wv[x] if x >= self.vdim else self.sparams.RL[x]
             z = self.params.RH.dot(rh) + vec
             rh = sigmoid(z)
         y_hat = softmax(self.params.U.dot(np.concatenate((lh, rh))))
@@ -283,9 +283,28 @@ class BRNNLM(NNBase):
             y_hat[high_idx] = 0.0
         return missings
 
+    def generate_missing_multiple(self, before, after, nwords=1, wv=None, nres=5):
+        missings = set()
+        candidates = [([], [])]
+        while len(candidates) > 0:
+            l, r = candidates[0]
+            if len(l) + len(r) == nwords:
+                break
+            words = self.generate_missing_word(before + l, after + r, wv, nres)
+            for word in words:
+                candidates.append((l+[word], r))
+                candidates.append((l, [word]+r))
+            candidates.pop(0)
+        for i in xrange(len(candidates)):
+            sentence = before + candidates[i][0] + candidates[i][1] + after
+            loss = self.compute_seq_loss(sentence, None, wv) / len(sentence)
+            missings.add((tuple(candidates[i][0] + candidates[i][1]), loss))
+        missings = sorted(list(missings), key=lambda x:x[1])
+        return missings
+
     def generate_missing_seqs(self, before, after, nwords=1, wv=None, nres=5):
         target_len = len(before) + len(after) + nwords
-        seqs = []
+        seqs = set()
         candidates = [(before, after)]
         while len(candidates) > 0:
             b, a = candidates[0]
@@ -298,8 +317,8 @@ class BRNNLM(NNBase):
             candidates.pop(0)
         for i in xrange(len(candidates)/2):
             sentence = candidates[i*2][0] + candidates[i*2][1]
-            seqs.append((sentence, self.compute_seq_loss(sentence, None, wv)))
-        seqs = sorted(seqs, key=lambda x:x[1])
+            seqs.add((tuple(sentence), self.compute_seq_loss(sentence, None, wv)))
+        seqs = sorted(list(seqs), key=lambda x:x[1])
         return seqs
 
 

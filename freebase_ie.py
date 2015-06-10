@@ -3,7 +3,6 @@
 
 import json
 import urllib
-import sys
 from collections import defaultdict
 
 # remove '_' if it is concatenating two words
@@ -63,7 +62,6 @@ def construct_ppdb_from_file(file_name):
     with open(file_name) as f:
         for line in f:
             data = line.split(" ||| ")
-            pos_tag = data[0]
             source = data[1]
             target = data[2]
             ppdb[source].append(target)
@@ -190,16 +188,16 @@ def extract_freebase_tuples(query=None, used_ppdb=False, min_tuples=6, ppdb=None
 
 # ============== BEGIN SCRIPT ==============
 
-ppdb = construct_ppdb_from_file("ppdb-1.0-s-all")
+#ppdb = construct_ppdb_from_file("ppdb-1.0-s-all")
 
 # Example query for "Obama" with PPDB turned off
-# tuples = extract_freebase_tuples(query="Obama", used_ppdb=False, ppdb=ppdb)
+#tuples = extract_freebase_tuples(query="Obama", used_ppdb=False, ppdb=ppdb)
 
 # Example query for "Stanford" with PPDB expansion turned on
 # tuples = extract_freebase_tuples(query="Stanford", used_ppdb=True, ppdb=ppdb)
 
 # Example random query, requiring 10 relation tuples (pre-PPDB) 
-tuples = extract_freebase_tuples(query=None, used_ppdb=False, min_tuples=10, ppdb=ppdb)
+#tuples = extract_freebase_tuples(query=None, used_ppdb=False, min_tuples=10, ppdb=ppdb)
 
-print_tuples(tuples)
+#print_tuples(tuples)
 
